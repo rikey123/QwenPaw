@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """File utility helpers for QQ media sending."""
 
+# pylint: disable=too-many-return-statements
 from __future__ import annotations
 
 import hashlib
@@ -53,7 +54,7 @@ _MAX_UPLOAD_SIZES = {
 }
 
 
-def is_local_path(path: str) -> bool:  # noqa: R0911
+def is_local_path(path: str) -> bool:
     """Return ``True`` when *path* looks like a local filesystem path."""
 
     if not path or not path.strip():
