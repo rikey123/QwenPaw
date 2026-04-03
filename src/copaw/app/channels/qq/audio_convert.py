@@ -13,7 +13,17 @@ from typing import Optional
 
 LOGGER = logging.getLogger(__name__)
 
-AUDIO_EXTENSIONS = {"aac", "amr", "flac", "m4a", "mp3", "ogg", "opus", "silk", "wav"}
+AUDIO_EXTENSIONS = {
+    "aac",
+    "amr",
+    "flac",
+    "m4a",
+    "mp3",
+    "ogg",
+    "opus",
+    "silk",
+    "wav",
+}
 SILK_EXTENSION = "silk"
 
 
@@ -30,7 +40,10 @@ def is_audio_file(path) -> bool:
 def should_transcode_voice(path) -> bool:
     """Return ``True`` when *path* is audio and not already SILK."""
 
-    return is_audio_file(path) and _extension(os.fspath(path)) != SILK_EXTENSION
+    return (
+        is_audio_file(path)
+        and _extension(os.fspath(path)) != SILK_EXTENSION
+    )
 
 
 def _find_binary(name: str) -> Optional[str]:
@@ -59,23 +72,38 @@ async def get_audio_duration(path: str) -> float:
     ]
     try:
         process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await process.communicate()
     except Exception:
         LOGGER.exception("ffprobe failed for %s", path)
         return 0.0
     if process.returncode != 0:
-        LOGGER.error("ffprobe returned %s for %s: %s", process.returncode, path, stderr.decode().strip())
+        LOGGER.error(
+            "ffprobe returned %s for %s: %s",
+            process.returncode,
+            path,
+            stderr.decode().strip(),
+        )
         return 0.0
     try:
         return float(stdout.decode().strip() or 0.0)
     except ValueError:
-        LOGGER.error("Invalid ffprobe duration output for %s: %r", path, stdout)
+        LOGGER.error(
+            "Invalid ffprobe duration output for %s: %r",
+            path,
+            stdout,
+        )
         return 0.0
 
 
-def _run_ffmpeg_pipeline(ffmpeg: str, input_path: str, output_path: str) -> bool:
+def _run_ffmpeg_pipeline(
+    ffmpeg: str,
+    input_path: str,
+    output_path: str,
+) -> bool:
     decode_cmd = [
         ffmpeg,
         "-y",
@@ -113,16 +141,26 @@ def _run_ffmpeg_pipeline(ffmpeg: str, input_path: str, output_path: str) -> bool
         output_path,
     ]
     try:
-        first = subprocess.Popen(decode_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        second = subprocess.Popen(
-            encode_cmd, stdin=first.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-        )
-        if first.stdout:
-            first.stdout.close()
-        _, first_stderr = first.communicate()
-        _, second_stderr = second.communicate()
+        with subprocess.Popen(
+            decode_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ) as first:
+            with subprocess.Popen(
+                encode_cmd,
+                stdin=first.stdout,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            ) as second:
+                if first.stdout:
+                    first.stdout.close()
+                _, first_stderr = first.communicate()
+                _, second_stderr = second.communicate()
     except Exception:
-        LOGGER.exception("FFmpeg conversion pipeline failed for %s", input_path)
+        LOGGER.exception(
+            "FFmpeg conversion pipeline failed for %s",
+            input_path,
+        )
         return False
     if first.returncode != 0 or second.returncode != 0:
         LOGGER.error(
@@ -144,28 +182,53 @@ async def audio_to_silk(input_path: str, output_dir: str) -> Optional[str]:
     """Convert *input_path* to a SILK file inside *output_dir*."""
 
     ffmpeg = _find_binary("ffmpeg")
-    if not ffmpeg or not os.path.isfile(input_path) or not is_audio_file(input_path):
-        LOGGER.warning("Cannot convert unsupported or missing audio file: %s", input_path)
+    if (
+        not ffmpeg
+        or not os.path.isfile(input_path)
+        or not is_audio_file(input_path)
+    ):
+        LOGGER.warning(
+            "Cannot convert unsupported or missing audio file: %s",
+            input_path,
+        )
         return None
     os.makedirs(output_dir, exist_ok=True)
-    final_path = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(input_path))[0]}.silk")
+    final_path = os.path.join(
+        output_dir,
+        f"{os.path.splitext(os.path.basename(input_path))[0]}.silk",
+    )
     if _extension(input_path) == SILK_EXTENSION:
         try:
             if os.path.abspath(input_path) != os.path.abspath(final_path):
                 shutil.copy2(input_path, final_path)
             return final_path
         except OSError:
-            LOGGER.exception("Failed to copy SILK file from %s to %s", input_path, final_path)
+            LOGGER.exception(
+                "Failed to copy SILK file from %s to %s",
+                input_path,
+                final_path,
+            )
             return None
-    with tempfile.TemporaryDirectory(prefix="qq-audio-", dir=output_dir) as temp_dir:
+    with tempfile.TemporaryDirectory(
+        prefix="qq-audio-",
+        dir=output_dir,
+    ) as temp_dir:
         temp_output = os.path.join(temp_dir, "voice.silk")
-        if not await asyncio.to_thread(_run_ffmpeg_pipeline, ffmpeg, input_path, temp_output):
+        if not await asyncio.to_thread(
+            _run_ffmpeg_pipeline,
+            ffmpeg,
+            input_path,
+            temp_output,
+        ):
             return None
         try:
             os.replace(temp_output, final_path)
             return final_path
         except OSError:
-            LOGGER.exception("Failed to move converted SILK file into place: %s", final_path)
+            LOGGER.exception(
+                "Failed to move converted SILK file into place: %s",
+                final_path,
+            )
             return None
 
 

@@ -22,12 +22,8 @@ MEDIA_TAG_REGEX = re.compile(
     r"(?:/>|>(?P<body>.*?)</(?P=tag)\s*>)",
     re.IGNORECASE | re.DOTALL,
 )
-"""Compiled pattern that matches supported media tags.
-
-Supported tags are ``<qqimg>``, ``<qqvoice>``, ``<qqvideo>``,
-``<qqfile>``, ``<qqmedia>``, and ``<img>``. The pattern accepts both
-self-closing tags and explicit opening/closing tag pairs.
-"""
+# Matches ``<qqimg>``, ``<qqvoice>``, ``<qqvideo>``, ``<qqfile>``,
+# ``<qqmedia>``, and ``<img>`` tags in either self-closing or paired form.
 
 _ATTR_REGEX = re.compile(
     r"(?P<name>[\w:-]+)\s*=\s*"
@@ -163,7 +159,7 @@ def parse_media_tags(text: str) -> list[SendQueueItem]:
 
     for match in MEDIA_TAG_REGEX.finditer(text):
         if match.start() > last_end:
-            _append_text_item(items, text[last_end : match.start()])
+            _append_text_item(items, text[last_end:match.start()])
 
         item = _build_media_item(match)
         if item is None:
@@ -238,4 +234,9 @@ def _extract_media_content(attrs: dict[str, str], body: str) -> str:
     return body
 
 
-__all__ = ["MEDIA_TAG_REGEX", "SendQueueItem", "fix_path_encoding", "parse_media_tags"]
+__all__ = [
+    "MEDIA_TAG_REGEX",
+    "SendQueueItem",
+    "fix_path_encoding",
+    "parse_media_tags",
+]

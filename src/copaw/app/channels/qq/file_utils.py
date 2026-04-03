@@ -53,7 +53,9 @@ _MAX_UPLOAD_SIZES = {
 }
 
 
-def is_local_path(path: str) -> bool:
+def is_local_path(
+    path: str,
+) -> bool:  # pylint: disable=too-many-return-statements
     """Return ``True`` when *path* looks like a local filesystem path."""
 
     if not path or not path.strip():

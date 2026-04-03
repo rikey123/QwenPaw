@@ -32,13 +32,13 @@ from copaw.app.channels.qq.ssrf_guard import is_safe_url
 
 
 def _create_temp_file(content: bytes, suffix: str = "") -> Path:
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    try:
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=suffix,
+    ) as temp_file:
         temp_file.write(content)
         temp_file.flush()
         return Path(temp_file.name)
-    finally:
-        temp_file.close()
 
 
 class TestFileUtils:
@@ -60,7 +60,9 @@ class TestFileUtils:
         temp_path = _create_temp_file(content, suffix=".bin")
 
         try:
-            assert get_file_hash(str(temp_path)) == hashlib.sha256(content).hexdigest()
+            assert get_file_hash(str(temp_path)) == hashlib.sha256(
+                content
+            ).hexdigest()
         finally:
             temp_path.unlink(missing_ok=True)
 

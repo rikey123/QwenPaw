@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import json
 import logging
 import os
 from collections import namedtuple
@@ -45,11 +43,19 @@ async def _api_request(
         "Content-Type": "application/json",
     }
     async with session.request(
-        method, url, json=data, headers=headers, timeout=aiohttp.ClientTimeout(total=60)
+        method,
+        url,
+        json=data,
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=60),
     ) as resp:
         result = await resp.json()
         if resp.status >= 400:
-            raise QQApiError(f"API {path} failed: {resp.status} {result}", resp.status, result)
+            raise QQApiError(
+                f"API {path} failed: {resp.status} {result}",
+                resp.status,
+                result,
+            )
         return result
 
 
@@ -95,18 +101,30 @@ async def _upload_part(
     file_type: int,
 ) -> Dict[str, Any]:
     """Upload single part."""
-    path = f"/v2/media/{target_type}/{target_id}/upload/{upload_id}/part/{part_number}"
+    del file_type
+
+    path = (
+        f"/v2/media/{target_type}/{target_id}/upload/"
+        f"{upload_id}/part/{part_number}"
+    )
     headers = {
         "Authorization": f"QQBot {access_token}",
         "Content-Type": "application/octet-stream",
     }
     url = f"{API_BASE}{path}"
     async with session.put(
-        url, data=data, headers=headers, timeout=aiohttp.ClientTimeout(total=300)
+        url,
+        data=data,
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=300),
     ) as resp:
         result = await resp.json()
         if resp.status >= 400:
-            raise QQApiError(f"Upload part {part_number} failed: {resp.status}", resp.status, result)
+            raise QQApiError(
+                f"Upload part {part_number} failed: {resp.status}",
+                resp.status,
+                result,
+            )
         return result
 
 
@@ -120,9 +138,14 @@ async def _complete_upload(
     file_type: int,
 ) -> Dict[str, Any]:
     """Complete upload and get file_info."""
+    del file_type
+
     data = {
         "upload_id": upload_id,
-        "part_info": [{"part_number": i + 1, "part_key": key} for i, key in enumerate(part_keys)],
+        "part_info": [
+            {"part_number": index + 1, "part_key": key}
+            for index, key in enumerate(part_keys)
+        ],
     }
     path = f"/v2/media/{target_type}/{target_id}/upload_complete"
     return await _api_request(session, access_token, "POST", path, data)
@@ -137,6 +160,8 @@ async def chunked_upload_c2c(
     access_token: str,
 ) -> str:
     """Chunked upload for C2C messages."""
+    del app_id, client_secret
+
     async with aiohttp.ClientSession() as session:
         prepare_result = await _upload_prepare(
             session, access_token, "users", user_id, file_path, file_type
@@ -152,12 +177,25 @@ async def chunked_upload_c2c(
             for part_num in range(total_parts):
                 chunk = f.read(block_size)
                 result = await _upload_part(
-                    session, access_token, "users", user_id, upload_id, part_num + 1, chunk, file_type
+                    session,
+                    access_token,
+                    "users",
+                    user_id,
+                    upload_id,
+                    part_num + 1,
+                    chunk,
+                    file_type,
                 )
                 part_keys.append(result.get("part_key", ""))
 
         complete_result = await _complete_upload(
-            session, access_token, "users", user_id, upload_id, part_keys, file_type
+            session,
+            access_token,
+            "users",
+            user_id,
+            upload_id,
+            part_keys,
+            file_type,
         )
         return complete_result.get("file_info", "")
 
@@ -171,6 +209,8 @@ async def chunked_upload_group(
     access_token: str,
 ) -> str:
     """Chunked upload for Group messages."""
+    del app_id, client_secret
+
     async with aiohttp.ClientSession() as session:
         prepare_result = await _upload_prepare(
             session, access_token, "groups", group_id, file_path, file_type
@@ -186,12 +226,25 @@ async def chunked_upload_group(
             for part_num in range(total_parts):
                 chunk = f.read(block_size)
                 result = await _upload_part(
-                    session, access_token, "groups", group_id, upload_id, part_num + 1, chunk, file_type
+                    session,
+                    access_token,
+                    "groups",
+                    group_id,
+                    upload_id,
+                    part_num + 1,
+                    chunk,
+                    file_type,
                 )
                 part_keys.append(result.get("part_key", ""))
 
         complete_result = await _complete_upload(
-            session, access_token, "groups", group_id, upload_id, part_keys, file_type
+            session,
+            access_token,
+            "groups",
+            group_id,
+            upload_id,
+            part_keys,
+            file_type,
         )
         return complete_result.get("file_info", "")
 

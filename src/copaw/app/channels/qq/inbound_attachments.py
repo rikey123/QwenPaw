@@ -1,6 +1,11 @@
+import aiohttp
+import asyncio
+import hashlib
+import json
+import logging
+import os
 from dataclasses import dataclass, field
-from typing import List, Optional, Any, Dict
-import aiohttp, asyncio, logging, os, hashlib, json
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +33,17 @@ class ProcessedAttachments:
 EMPTY_RESULT = ProcessedAttachments()
 
 
-def _local_path(base_dir: str, attachment: RawAttachment, default_ext: str) -> str:
-    name = os.path.basename((attachment.filename or "").strip()) or hashlib.sha1(
-        f"{attachment.url}|{attachment.content_type}".encode("utf-8")
-    ).hexdigest()[:16]
+def _local_path(
+    base_dir: str,
+    attachment: RawAttachment,
+    default_ext: str,
+) -> str:
+    name = (
+        os.path.basename((attachment.filename or "").strip())
+        or hashlib.sha1(
+            f"{attachment.url}|{attachment.content_type}".encode("utf-8")
+        ).hexdigest()[:16]
+    )
     root, ext = os.path.splitext(name)
     return os.path.join(base_dir, f"{root or 'file'}{ext or default_ext}")
 
@@ -43,10 +55,19 @@ def _write_bytes(file_path: str, content: bytes) -> None:
 
 async def download_file(http_session, url, file_path) -> bool:
     try:
-        await asyncio.to_thread(lambda: os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True))
+        await asyncio.to_thread(
+            lambda: os.makedirs(
+                os.path.dirname(file_path) or ".",
+                exist_ok=True,
+            )
+        )
         async with http_session.get(url) as resp:
             if resp.status != 200:
-                logger.warning("qq attachment download failed: status=%s url=%s", resp.status, url)
+                logger.warning(
+                    "qq attachment download failed: status=%s url=%s",
+                    resp.status,
+                    url,
+                )
                 return False
             content = await resp.read()
         await asyncio.to_thread(_write_bytes, file_path, content)
@@ -56,22 +77,41 @@ async def download_file(http_session, url, file_path) -> bool:
         return False
 
 
-async def process_attachments(attachments: List[RawAttachment], ctx: Dict[str, Any]) -> ProcessedAttachments:
+async def process_attachments(
+    attachments: List[RawAttachment],
+    ctx: Dict[str, Any],
+) -> ProcessedAttachments:
     if not attachments:
         return EMPTY_RESULT
     result = ProcessedAttachments()
-    base_dir = str(ctx.get("media_dir") or ctx.get("temp_dir") or os.path.join(os.getcwd(), "tmp", "qq_attachments"))
+    base_dir = str(
+        ctx.get("media_dir")
+        or ctx.get("temp_dir")
+        or os.path.join(os.getcwd(), "tmp", "qq_attachments")
+    )
     session, owns_session = ctx.get("http_session"), False
     if session is None:
         session, owns_session = aiohttp.ClientSession(), True
     try:
         for attachment in attachments:
-            mime = (attachment.content_type or "").split(";", 1)[0].strip().lower()
-            is_image, is_audio = mime.startswith("image/"), mime.startswith("audio/") or mime == "voice"
+            mime = (
+                (attachment.content_type or "")
+                .split(";", 1)[0]
+                .strip()
+                .lower()
+            )
+            is_image = mime.startswith("image/")
+            is_audio = mime.startswith("audio/") or mime == "voice"
             if not attachment.url or not (is_image or is_audio):
                 continue
-            source_url = (attachment.voice_wav_url or attachment.url) if is_audio else attachment.url
-            path = _local_path(base_dir, attachment, ".wav" if is_audio else ".bin")
+            source_url = (
+                attachment.voice_wav_url or attachment.url
+            ) if is_audio else attachment.url
+            path = _local_path(
+                base_dir,
+                attachment,
+                ".wav" if is_audio else ".bin",
+            )
             if not await download_file(session, source_url, path):
                 continue
             if is_image:
@@ -80,10 +120,15 @@ async def process_attachments(attachments: List[RawAttachment], ctx: Dict[str, A
             else:
                 result.voiceAttachmentPaths.append(path)
                 result.voiceAttachmentUrls.append(source_url)
-                result.voiceAsrReferTexts.append(attachment.asr_refer_text or "")
+                result.voiceAsrReferTexts.append(
+                    attachment.asr_refer_text or ""
+                )
                 result.voiceTranscripts.append("")
         result.attachmentInfo = json.dumps(
-            {"image_count": len(result.imageUrls), "voice_count": len(result.voiceAttachmentUrls)},
+            {
+                "image_count": len(result.imageUrls),
+                "voice_count": len(result.voiceAttachmentUrls),
+            },
             ensure_ascii=False,
         )
         return result

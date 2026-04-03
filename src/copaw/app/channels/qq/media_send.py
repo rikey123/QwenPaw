@@ -12,14 +12,25 @@ from typing import Any
 
 import aiohttp
 
-from .file_utils import file_exists, get_file_hash, get_file_size, is_local_path
+from .file_utils import (
+    file_exists,
+    get_file_hash,
+    get_file_size,
+    is_local_path,
+)
 from .media_tags import SendQueueItem
 
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.sgroup.qq.com"
-MediaTargetContext = namedtuple("MediaTargetContext", "target_type target_id is_at")
-MediaSendResult = namedtuple("MediaSendResult", "success error error_code result")
+MediaTargetContext = namedtuple(
+    "MediaTargetContext",
+    "target_type target_id is_at",
+)
+MediaSendResult = namedtuple(
+    "MediaSendResult",
+    "success error error_code result",
+)
 MediaFileType = {"IMAGE": 1, "VIDEO": 2, "AUDIO": 3, "FILE": 4}
 
 
@@ -72,7 +83,12 @@ def _extract_error(data: Any) -> tuple[str, int]:
             or data.get("errmsg")
             or json.dumps(data, ensure_ascii=False)
         )
-        code = data.get("code") or data.get("err_code") or data.get("ret") or -1
+        code = (
+            data.get("code")
+            or data.get("err_code")
+            or data.get("ret")
+            or -1
+        )
         try:
             return str(message), int(code)
         except (TypeError, ValueError):
@@ -88,8 +104,17 @@ async def api_request(session, access_token, method, path, data=None):
         "Authorization": f"QQBot {access_token}",
         "Content-Type": "application/json",
     }
-    payload = json.dumps(data, ensure_ascii=False) if data is not None else None
-    async with session.request(method, url, data=payload, headers=headers) as resp:
+    payload = (
+        json.dumps(data, ensure_ascii=False)
+        if data is not None
+        else None
+    )
+    async with session.request(
+        method,
+        url,
+        data=payload,
+        headers=headers,
+    ) as resp:
         text = await resp.text()
         try:
             result = json.loads(text) if text else {}
@@ -97,11 +122,20 @@ async def api_request(session, access_token, method, path, data=None):
             result = {"raw": text}
         if resp.status >= 400:
             message, code = _extract_error(result)
-            raise RuntimeError(f"QQ API {resp.status} {path}: {message} ({code})")
+            raise RuntimeError(
+                f"QQ API {resp.status} {path}: {message} ({code})",
+            )
         return result
 
 
-async def upload_file_url(session, access_token, target_type, target_id, file_url, file_type):
+async def upload_file_url(
+    session,
+    access_token,
+    target_type,
+    target_id,
+    file_url,
+    file_type,
+):
     """Upload a remote file to QQ rich media API and return file_info."""
 
     response = await api_request(
@@ -125,7 +159,14 @@ def _get_md5_hash(file_path: str) -> str:
     return hasher.hexdigest()
 
 
-async def upload_local_file(session, access_token, target_type, target_id, file_path, file_type):
+async def upload_local_file(
+    session,
+    access_token,
+    target_type,
+    target_id,
+    file_path,
+    file_type,
+):
     """Upload a local file via multipart form data and return file_info."""
 
     if not file_exists(file_path):
@@ -148,7 +189,11 @@ async def upload_local_file(session, access_token, target_type, target_id, file_
     headers = {"Authorization": f"QQBot {access_token}"}
     url = f"{API_BASE}/v2/media/{target_type}/{target_id}/files"
     with open(file_path, "rb") as file_obj:
-        form.add_field("file", file_obj, filename=file_path.rsplit("\\", 1)[-1])
+        form.add_field(
+            "file",
+            file_obj,
+            filename=file_path.rsplit("\\", 1)[-1],
+        )
         async with session.post(url, data=form, headers=headers) as resp:
             text = await resp.text()
             try:
@@ -166,7 +211,14 @@ async def upload_local_file(session, access_token, target_type, target_id, file_
             return file_info
 
 
-async def send_media_message(session, access_token, target_type, target_id, file_info, msg_id=None):
+async def send_media_message(
+    session,
+    access_token,
+    target_type,
+    target_id,
+    file_info,
+    msg_id=None,
+):
     """Send a QQ rich media message using an uploaded file_info token."""
 
     body = {"msg_type": 7, "media": {"file_info": file_info}}
@@ -176,12 +228,22 @@ async def send_media_message(session, access_token, target_type, target_id, file
         session,
         access_token,
         "POST",
-        f"/v2/media/{_normalize_target_type(target_type)}/{target_id}/messages",
+        (
+            f"/v2/media/{_normalize_target_type(target_type)}"
+            f"/{target_id}/messages"
+        ),
         body,
     )
 
 
-async def _send_media(target, file_path, access_token, app_id, reply_to_id, file_type):
+async def _send_media(
+    target,
+    file_path,
+    access_token,
+    app_id,
+    reply_to_id,
+    file_type,
+):
     del app_id
     try:
         resolved = _resolve_target(target)
@@ -220,12 +282,22 @@ async def _send_media(target, file_path, access_token, app_id, reply_to_id, file
             )
             return MediaSendResult(True, "", 0, result)
     except Exception as exc:
-        logger.exception("qq media send failed: path=%s type=%s", file_path, file_type)
+        logger.exception(
+            "qq media send failed: path=%s type=%s",
+            file_path,
+            file_type,
+        )
         error, error_code = _extract_error(getattr(exc, "args", [str(exc)])[0])
         return MediaSendResult(False, error, error_code, None)
 
 
-async def send_photo(target, file_path, access_token, app_id, reply_to_id=None):
+async def send_photo(
+    target,
+    file_path,
+    access_token,
+    app_id,
+    reply_to_id=None,
+):
     return await _send_media(
         target,
         file_path,
@@ -236,7 +308,13 @@ async def send_photo(target, file_path, access_token, app_id, reply_to_id=None):
     )
 
 
-async def send_video_msg(target, file_path, access_token, app_id, reply_to_id=None):
+async def send_video_msg(
+    target,
+    file_path,
+    access_token,
+    app_id,
+    reply_to_id=None,
+):
     return await _send_media(
         target,
         file_path,
@@ -247,7 +325,13 @@ async def send_video_msg(target, file_path, access_token, app_id, reply_to_id=No
     )
 
 
-async def send_voice(target, file_path, access_token, app_id, reply_to_id=None):
+async def send_voice(
+    target,
+    file_path,
+    access_token,
+    app_id,
+    reply_to_id=None,
+):
     return await _send_media(
         target,
         file_path,
@@ -258,7 +342,13 @@ async def send_voice(target, file_path, access_token, app_id, reply_to_id=None):
     )
 
 
-async def send_document(target, file_path, access_token, app_id, reply_to_id=None):
+async def send_document(
+    target,
+    file_path,
+    access_token,
+    app_id,
+    reply_to_id=None,
+):
     return await _send_media(
         target,
         file_path,
@@ -269,7 +359,14 @@ async def send_document(target, file_path, access_token, app_id, reply_to_id=Non
     )
 
 
-async def send_media_auto(target, media_type, file_path, access_token, app_id, reply_to_id=None):
+async def send_media_auto(
+    target,
+    media_type,
+    file_path,
+    access_token,
+    app_id,
+    reply_to_id=None,
+):
     media_type = (media_type or "").strip().lower()
     handlers = {
         "image": send_photo,
@@ -281,33 +378,91 @@ async def send_media_auto(target, media_type, file_path, access_token, app_id, r
     }
     handler = handlers.get(media_type)
     if not handler:
-        return MediaSendResult(False, f"unsupported media_type: {media_type}", -1, None)
+        return MediaSendResult(
+            False,
+            f"unsupported media_type: {media_type}",
+            -1,
+            None,
+        )
     return await handler(target, file_path, access_token, app_id, reply_to_id)
 
 
-async def execute_send_queue(target, queue, access_token, app_id, reply_to_id=None):
+async def execute_send_queue(
+    target,
+    queue,
+    access_token,
+    app_id,
+    reply_to_id=None,
+):
     results = []
     for item in queue:
         if not isinstance(item, SendQueueItem):
-            logger.warning("qq send queue skipped non-SendQueueItem value: %r", item)
-            results.append(MediaSendResult(False, "invalid queue item", -1, None))
+            logger.warning(
+                "qq send queue skipped non-SendQueueItem value: %r",
+                item,
+            )
+            results.append(
+                MediaSendResult(False, "invalid queue item", -1, None)
+            )
             continue
         if item.type == "text":
             continue
         if item.type == "image":
-            results.append(await send_photo(target, item.content, access_token, app_id, reply_to_id))
+            results.append(
+                await send_photo(
+                    target,
+                    item.content,
+                    access_token,
+                    app_id,
+                    reply_to_id,
+                )
+            )
             continue
         if item.type == "video":
-            results.append(await send_video_msg(target, item.content, access_token, app_id, reply_to_id))
+            results.append(
+                await send_video_msg(
+                    target,
+                    item.content,
+                    access_token,
+                    app_id,
+                    reply_to_id,
+                )
+            )
             continue
         if item.type == "voice":
-            results.append(await send_voice(target, item.content, access_token, app_id, reply_to_id))
+            results.append(
+                await send_voice(
+                    target,
+                    item.content,
+                    access_token,
+                    app_id,
+                    reply_to_id,
+                )
+            )
             continue
         if item.type == "file":
-            results.append(await send_document(target, item.content, access_token, app_id, reply_to_id))
+            results.append(
+                await send_document(
+                    target,
+                    item.content,
+                    access_token,
+                    app_id,
+                    reply_to_id,
+                )
+            )
             continue
-        logger.warning("qq send queue skipped unsupported item type: %s", item.type)
-        results.append(MediaSendResult(False, f"unsupported queue item type: {item.type}", -1, None))
+        logger.warning(
+            "qq send queue skipped unsupported item type: %s",
+            item.type,
+        )
+        results.append(
+            MediaSendResult(
+                False,
+                f"unsupported queue item type: {item.type}",
+                -1,
+                None,
+            )
+        )
     return results
 
 
