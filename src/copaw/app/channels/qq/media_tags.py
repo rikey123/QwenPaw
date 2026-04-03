@@ -26,8 +26,7 @@ MEDIA_TAG_REGEX = re.compile(
 # ``<qqmedia>``, and ``<img>`` tags in either self-closing or paired form.
 
 _ATTR_REGEX = re.compile(
-    r"(?P<name>[\w:-]+)\s*=\s*"
-    + r"(?P<quote>['\"])(?P<value>.*?)(?P=quote)",
+    r"(?P<name>[\w:-]+)\s*=\s*" + r"(?P<quote>['\"])(?P<value>.*?)(?P=quote)",
     re.DOTALL,
 )
 
@@ -173,7 +172,7 @@ def parse_media_tags(text: str) -> list[SendQueueItem]:
 
     for match in MEDIA_TAG_REGEX.finditer(text):
         if match.start() > last_end:
-            _append_text_item(items, text[last_end:match.start()])
+            _append_text_item(items, text[last_end : match.start()])
 
         item = _build_media_item(match)
         if item is None:

@@ -60,9 +60,12 @@ class TestFileUtils:
         temp_path = _create_temp_file(content, suffix=".bin")
 
         try:
-            assert get_file_hash(str(temp_path)) == hashlib.sha256(
-                content
-            ).hexdigest()
+            assert (
+                get_file_hash(str(temp_path))
+                == hashlib.sha256(
+                    content,
+                ).hexdigest()
+            )
         finally:
             temp_path.unlink(missing_ok=True)
 
@@ -120,14 +123,14 @@ class TestMediaTags:
         text = '<qqimg src="https://example.com/cat.png" />'
 
         assert parse_media_tags(text) == [
-            SendQueueItem(type="image", content="https://example.com/cat.png")
+            SendQueueItem(type="image", content="https://example.com/cat.png"),
         ]
 
     def test_parse_media_tags_voice(self) -> None:
         text = "<qqvoice>voice.silk</qqvoice>"
 
         assert parse_media_tags(text) == [
-            SendQueueItem(type="voice", content="voice.silk")
+            SendQueueItem(type="voice", content="voice.silk"),
         ]
 
     def test_parse_media_tags_mixed(self) -> None:

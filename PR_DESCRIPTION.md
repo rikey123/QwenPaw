@@ -121,7 +121,7 @@ from .ssrf_guard import is_safe_url, validate_remote_url
 
 QQ API requires specific hashes for verification:
 - `md5`: Full file MD5 (hex)
-- `sha1`: Full file SHA1 (hex)  
+- `sha1`: Full file SHA1 (hex)
 - `md5_10m`: MD5 of first 10MB (or full file if < 10MB)
 
 ```python

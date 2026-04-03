@@ -164,7 +164,12 @@ async def chunked_upload_c2c(
 
     async with aiohttp.ClientSession() as session:
         prepare_result = await _upload_prepare(
-            session, access_token, "users", user_id, file_path, file_type
+            session,
+            access_token,
+            "users",
+            user_id,
+            file_path,
+            file_type,
         )
         upload_id = str(prepare_result.get("upload_id", ""))
         block_size = int(prepare_result.get("block_size", 1024 * 1024))
@@ -213,7 +218,12 @@ async def chunked_upload_group(
 
     async with aiohttp.ClientSession() as session:
         prepare_result = await _upload_prepare(
-            session, access_token, "groups", group_id, file_path, file_type
+            session,
+            access_token,
+            "groups",
+            group_id,
+            file_path,
+            file_type,
         )
         upload_id = str(prepare_result.get("upload_id", ""))
         block_size = int(prepare_result.get("block_size", 1024 * 1024))

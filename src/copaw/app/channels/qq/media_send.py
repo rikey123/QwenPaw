@@ -84,10 +84,7 @@ def _extract_error(data: Any) -> tuple[str, int]:
             or json.dumps(data, ensure_ascii=False)
         )
         code = (
-            data.get("code")
-            or data.get("err_code")
-            or data.get("ret")
-            or -1
+            data.get("code") or data.get("err_code") or data.get("ret") or -1
         )
         try:
             return str(message), int(code)
@@ -105,9 +102,7 @@ async def api_request(session, access_token, method, path, data=None):
         "Content-Type": "application/json",
     }
     payload = (
-        json.dumps(data, ensure_ascii=False)
-        if data is not None
-        else None
+        json.dumps(data, ensure_ascii=False) if data is not None else None
     )
     async with session.request(
         method,
@@ -402,7 +397,7 @@ async def execute_send_queue(
                 item,
             )
             results.append(
-                MediaSendResult(False, "invalid queue item", -1, None)
+                MediaSendResult(False, "invalid queue item", -1, None),
             )
             continue
         if item.type == "text":
@@ -415,7 +410,7 @@ async def execute_send_queue(
                     access_token,
                     app_id,
                     reply_to_id,
-                )
+                ),
             )
             continue
         if item.type == "video":
@@ -426,7 +421,7 @@ async def execute_send_queue(
                     access_token,
                     app_id,
                     reply_to_id,
-                )
+                ),
             )
             continue
         if item.type == "voice":
@@ -437,7 +432,7 @@ async def execute_send_queue(
                     access_token,
                     app_id,
                     reply_to_id,
-                )
+                ),
             )
             continue
         if item.type == "file":
@@ -448,7 +443,7 @@ async def execute_send_queue(
                     access_token,
                     app_id,
                     reply_to_id,
-                )
+                ),
             )
             continue
         logger.warning(
@@ -461,7 +456,7 @@ async def execute_send_queue(
                 f"unsupported queue item type: {item.type}",
                 -1,
                 None,
-            )
+            ),
         )
     return results
 

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import asyncio
 import hashlib
 import json
@@ -42,7 +43,7 @@ def _local_path(
     name = (
         os.path.basename((attachment.filename or "").strip())
         or hashlib.sha1(
-            f"{attachment.url}|{attachment.content_type}".encode("utf-8")
+            f"{attachment.url}|{attachment.content_type}".encode("utf-8"),
         ).hexdigest()[:16]
     )
     root, ext = os.path.splitext(name)
@@ -60,7 +61,7 @@ async def download_file(http_session, url, file_path) -> bool:
             lambda: os.makedirs(
                 os.path.dirname(file_path) or ".",
                 exist_ok=True,
-            )
+            ),
         )
         async with http_session.get(url) as resp:
             if resp.status != 200:
@@ -88,7 +89,7 @@ async def process_attachments(
     base_dir = str(
         ctx.get("media_dir")
         or ctx.get("temp_dir")
-        or os.path.join(os.getcwd(), "tmp", "qq_attachments")
+        or os.path.join(os.getcwd(), "tmp", "qq_attachments"),
     )
     session, owns_session = ctx.get("http_session"), False
     if session is None:
@@ -106,8 +107,10 @@ async def process_attachments(
             if not attachment.url or not (is_image or is_audio):
                 continue
             source_url = (
-                attachment.voice_wav_url or attachment.url
-            ) if is_audio else attachment.url
+                (attachment.voice_wav_url or attachment.url)
+                if is_audio
+                else attachment.url
+            )
             path = _local_path(
                 base_dir,
                 attachment,
@@ -122,7 +125,7 @@ async def process_attachments(
                 result.voiceAttachmentPaths.append(path)
                 result.voiceAttachmentUrls.append(source_url)
                 result.voiceAsrReferTexts.append(
-                    attachment.asr_refer_text or ""
+                    attachment.asr_refer_text or "",
                 )
                 result.voiceTranscripts.append("")
         result.attachmentInfo = json.dumps(

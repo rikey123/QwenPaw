@@ -41,8 +41,7 @@ def should_transcode_voice(path) -> bool:
     """Return ``True`` when *path* is audio and not already SILK."""
 
     return (
-        is_audio_file(path)
-        and _extension(os.fspath(path)) != SILK_EXTENSION
+        is_audio_file(path) and _extension(os.fspath(path)) != SILK_EXTENSION
     )
 
 
