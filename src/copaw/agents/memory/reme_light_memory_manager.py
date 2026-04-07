@@ -141,6 +141,11 @@ See: https://docs.trychroma.com/docs/overview/troubleshooting#sqlite
         return key[:5] + "*" * (len(key) - 5) if len(key) > 5 else key
 
     @staticmethod
+    def _is_error_result_message(result: str) -> bool:
+        """Return True when ReMe returned a bracket-prefixed error string."""
+        return result.lstrip().startswith("[")
+
+    @staticmethod
     def _check_reme_version() -> bool:
         """Return False (and warn) when installed reme-ai version
         mismatches."""
@@ -298,10 +303,19 @@ See: https://docs.trychroma.com/docs/overview/troubleshooting#sqlite
             )
 
         if isinstance(result, str):
-            logger.error(
-                "compact_memory returned str instead of dict, "
-                f"result: {result[:200]}... "
+            if self._is_error_result_message(result):
+                logger.error(
+                    "compact_memory returned error message: %s...",
+                    result[:200],
+                )
+                return ""
+
+            logger.warning(
+                "compact_memory returned str instead of dict; "
+                "treating it as compacted content for compatibility, "
+                "result: %s... "
                 "Please install the latest reme package.",
+                result[:200],
             )
             return result
 

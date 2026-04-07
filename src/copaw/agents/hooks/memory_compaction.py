@@ -5,6 +5,7 @@ This hook monitors token usage and automatically compacts older messages
 when the context window approaches its limit, preserving recent messages
 and the system prompt.
 """
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,9 @@ class MemoryCompactionHook:
     messages while summarizing older conversation history.
     """
 
+    MAX_RETRIES = 3
+    RETRY_BACKOFF_BASE_SECONDS = 1.0
+
     def __init__(self, memory_manager: "BaseMemoryManager"):
         """Initialize memory compaction hook.
 
@@ -57,6 +61,18 @@ class MemoryCompactionHook:
             content=[TextBlock(type="text", text=text)],
         )
         await agent.print(msg)
+
+    @classmethod
+    def _compute_retry_backoff(cls, attempt: int) -> float:
+        """Return exponential backoff delay for the next retry."""
+        return cls.RETRY_BACKOFF_BASE_SECONDS * (2 ** max(0, attempt - 1))
+
+    @staticmethod
+    def _is_valid_compact_content(compact_content: str) -> bool:
+        """Return True when compaction produced usable summary content."""
+        return bool(
+            compact_content and not compact_content.lstrip().startswith("["),
+        )
 
     # pylint: disable=too-many-branches
     async def __call__(
@@ -175,14 +191,43 @@ class MemoryCompactionHook:
             )
 
             if running_config.context_compact.context_compact_enabled:
-                compact_content = await self.memory_manager.compact_memory(
-                    messages=messages_to_compact,
-                    previous_summary=memory.get_compressed_summary(),
-                )
-                if not compact_content:
+                compact_content = ""
+                last_error = ""
+                for attempt in range(1, self.MAX_RETRIES + 1):
+                    try:
+                        prev_summary = memory.get_compressed_summary()
+                        compact_content = (
+                            await self.memory_manager.compact_memory(
+                                messages=messages_to_compact,
+                                previous_summary=prev_summary,
+                            )
+                        )
+                        break
+                    except Exception as e:
+                        last_error = str(e)
+                        if attempt < self.MAX_RETRIES:
+                            backoff = self._compute_retry_backoff(attempt)
+                            logger.warning(
+                                "compact_memory attempt %d/%d failed: %s, "
+                                "retrying in %.1fs...",
+                                attempt,
+                                self.MAX_RETRIES,
+                                e,
+                                backoff,
+                            )
+                            await asyncio.sleep(backoff)
+                        else:
+                            logger.error(
+                                "compact_memory failed after %d attempts: %s",
+                                self.MAX_RETRIES,
+                                e,
+                            )
+
+                if not self._is_valid_compact_content(compact_content):
+                    error_msg = last_error or "empty result"
                     await self._print_status_message(
                         agent,
-                        "⚠️ Context compaction failed.",
+                        f"⚠️ Context compaction failed: {error_msg}",
                     )
                 else:
                     await self._print_status_message(
@@ -196,12 +241,13 @@ class MemoryCompactionHook:
                     "✅ Context compaction skipped",
                 )
 
-            updated_count = await memory.mark_messages_compressed(
-                messages_to_compact,
-            )
-            logger.info(f"Marked {updated_count} messages as compacted")
+            if compact_content:
+                updated_count = await memory.mark_messages_compressed(
+                    messages_to_compact,
+                )
+                logger.info(f"Marked {updated_count} messages as compacted")
 
-            await memory.update_compressed_summary(compact_content)
+                await memory.update_compressed_summary(compact_content)
 
         except Exception as e:
             logger.exception(
