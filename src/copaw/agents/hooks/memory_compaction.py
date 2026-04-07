@@ -5,19 +5,21 @@ This hook monitors token usage and automatically compacts older messages
 when the context window approaches its limit, preserving recent messages
 and the system prompt.
 """
+
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
 from agentscope.agent import ReActAgent
 from agentscope.message import Msg, TextBlock
+from pydantic import ValidationError
 from copaw.constant import MEMORY_COMPACT_KEEP_RECENT
 
+from ...config.config import load_agent_config
 from ..utils import (
     check_valid_messages,
     get_copaw_token_counter,
 )
-from ...config.config import load_agent_config
 
 if TYPE_CHECKING:
     from ..memory import BaseMemoryManager
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# pylint: disable=too-few-public-methods
 class MemoryCompactionHook:
     """Hook for automatic memory compaction when context is full.
 
@@ -35,6 +38,10 @@ class MemoryCompactionHook:
 
     MAX_RETRIES = 3
     RETRY_BACKOFF_BASE_SECONDS = 1.0
+    STATUS_STARTED = "\U0001F4E7 Context compaction started..."
+    STATUS_COMPLETED = "\u2705 Context compaction completed"
+    STATUS_SKIPPED = "\u2705 Context compaction skipped"
+    STATUS_FAILED_PREFIX = "\u26A0\uFE0F Context compaction failed: "
 
     def __init__(self, memory_manager: "BaseMemoryManager"):
         """Initialize memory compaction hook.
@@ -74,7 +81,185 @@ class MemoryCompactionHook:
             compact_content and not compact_content.lstrip().startswith("["),
         )
 
-    # pylint: disable=too-many-branches
+    @staticmethod
+    def _is_threshold_exhausted(left_compact_threshold: int) -> bool:
+        """Return True when no compaction budget remains.
+
+        This is measured after fixed context is accounted for.
+        """
+        return left_compact_threshold <= 0
+
+    async def _get_token_context(
+        self,
+        agent: ReActAgent,
+        agent_config: Any,
+    ) -> tuple[Any, Any, int]:
+        """Return memory, token counter, and remaining compaction budget."""
+        memory = agent.memory
+        token_counter = get_copaw_token_counter(agent_config)
+        combined_text = (agent.sys_prompt or "") + (
+            memory.get_compressed_summary() or ""
+        )
+        str_token_count = await token_counter.count(
+            messages=[],
+            text=combined_text,
+        )
+        left_compact_threshold = (
+            agent_config.running.memory_compact_threshold - str_token_count
+        )
+        return memory, token_counter, left_compact_threshold
+
+    async def _compact_tool_results_if_enabled(
+        self,
+        messages: list[Msg],
+        running_config: Any,
+    ) -> None:
+        """Compact stored tool results when the feature is enabled."""
+        tool_result_config = running_config.tool_result_compact
+        if not tool_result_config.enabled:
+            return
+
+        await self.memory_manager.compact_tool_result(
+            messages=messages,
+            recent_n=tool_result_config.recent_n,
+            old_max_bytes=tool_result_config.old_max_bytes,
+            recent_max_bytes=tool_result_config.recent_max_bytes,
+            retention_days=tool_result_config.retention_days,
+        )
+
+    @staticmethod
+    def _handle_invalid_messages(messages: list[Msg]) -> list[Msg]:
+        """Return the compactable portion for invalid message history."""
+        logger.warning(
+            "Please include the output of the /history command when "
+            "reporting the bug to the community. Invalid "
+            "messages=%s",
+            messages,
+        )
+        keep_length: int = MEMORY_COMPACT_KEEP_RECENT
+        messages_length = len(messages)
+        while keep_length > 0 and not check_valid_messages(
+            messages[max(messages_length - keep_length, 0) :],
+        ):
+            keep_length -= 1
+
+        if keep_length > 0:
+            return messages[: max(messages_length - keep_length, 0)]
+
+        return messages
+
+    async def _get_messages_to_compact(
+        self,
+        messages: list[Msg],
+        left_compact_threshold: int,
+        memory_compact_reserve: int,
+        token_counter: Any,
+    ) -> list[Msg]:
+        """Return the validated set of messages to compact."""
+        (
+            messages_to_compact,
+            _,
+            is_valid,
+        ) = await self.memory_manager.check_context(
+            messages=messages,
+            memory_compact_threshold=left_compact_threshold,
+            memory_compact_reserve=memory_compact_reserve,
+            as_token_counter=token_counter,
+        )
+
+        if not messages_to_compact:
+            return []
+
+        if not is_valid:
+            return self._handle_invalid_messages(messages)
+
+        return messages_to_compact
+
+    async def _execute_compact_with_retry(
+        self,
+        memory: Any,
+        messages_to_compact: list[Msg],
+    ) -> tuple[str, str]:
+        """Run memory compaction with retry and exponential backoff."""
+        compact_content = ""
+        last_error = ""
+
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                compact_content = await self.memory_manager.compact_memory(
+                    messages=messages_to_compact,
+                    previous_summary=memory.get_compressed_summary(),
+                )
+                break
+            except (
+                asyncio.TimeoutError,
+                OSError,
+                RuntimeError,
+            ) as exc:
+                last_error = str(exc)
+                if attempt < self.MAX_RETRIES:
+                    backoff = self._compute_retry_backoff(attempt)
+                    logger.warning(
+                        "compact_memory attempt %d/%d failed: %s, "
+                        "retrying in %.1fs...",
+                        attempt,
+                        self.MAX_RETRIES,
+                        exc,
+                        backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    logger.error(
+                        "compact_memory failed after %d attempts: %s",
+                        self.MAX_RETRIES,
+                        exc,
+                    )
+
+        return compact_content, last_error
+
+    async def _run_context_compaction(
+        self,
+        agent: ReActAgent,
+        running_config: Any,
+        memory: Any,
+        messages_to_compact: list[Msg],
+    ) -> str:
+        """Run context compaction and emit status messages."""
+        await self._print_status_message(agent, self.STATUS_STARTED)
+
+        if not running_config.context_compact.context_compact_enabled:
+            await self._print_status_message(agent, self.STATUS_SKIPPED)
+            return ""
+
+        compact_content, last_error = await self._execute_compact_with_retry(
+            memory=memory,
+            messages_to_compact=messages_to_compact,
+        )
+
+        if not self._is_valid_compact_content(compact_content):
+            error_msg = last_error or "empty result"
+            await self._print_status_message(
+                agent,
+                f"{self.STATUS_FAILED_PREFIX}{error_msg}",
+            )
+            return ""
+
+        await self._print_status_message(agent, self.STATUS_COMPLETED)
+        return compact_content
+
+    @staticmethod
+    async def _persist_compacted_summary(
+        memory: Any,
+        messages_to_compact: list[Msg],
+        compact_content: str,
+    ) -> None:
+        """Mark compacted messages and store the new compressed summary."""
+        updated_count = await memory.mark_messages_compressed(
+            messages_to_compact,
+        )
+        logger.info("Marked %d messages as compacted", updated_count)
+        await memory.update_compressed_summary(compact_content)
+
     async def __call__(
         self,
         agent: ReActAgent,
@@ -97,27 +282,21 @@ class MemoryCompactionHook:
         Returns:
             None (hook doesn't modify kwargs)
         """
+        del kwargs
+
         try:
-            # Get hot-reloaded agent config
             agent_config = load_agent_config(self.memory_manager.agent_id)
             running_config = agent_config.running
-            token_counter = get_copaw_token_counter(agent_config)
-
-            memory = agent.memory
-
-            system_prompt = agent.sys_prompt
-            compressed_summary = memory.get_compressed_summary()
-            str_token_count = await token_counter.count(
-                messages=[],
-                text=(system_prompt or "") + (compressed_summary or ""),
+            (
+                memory,
+                token_counter,
+                left_compact_threshold,
+            ) = await self._get_token_context(
+                agent=agent,
+                agent_config=agent_config,
             )
 
-            # memory_compact_threshold is always available from config
-            left_compact_threshold = (
-                running_config.memory_compact_threshold - str_token_count
-            )
-
-            if left_compact_threshold <= 0:
+            if self._is_threshold_exhausted(left_compact_threshold):
                 logger.warning(
                     "The memory_compact_threshold is set too low; "
                     "the combined token length of system_prompt and "
@@ -129,54 +308,17 @@ class MemoryCompactionHook:
                 return None
 
             messages = await memory.get_memory(prepend_summary=False)
-
-            # Compact tool results with configured thresholds
-            trc = running_config.tool_result_compact
-            if trc.enabled:
-                await self.memory_manager.compact_tool_result(
-                    messages=messages,
-                    recent_n=trc.recent_n,
-                    old_max_bytes=trc.old_max_bytes,
-                    recent_max_bytes=trc.recent_max_bytes,
-                    retention_days=trc.retention_days,
-                )
-
-            # memory_compact_reserve is always available from config
-            (
-                messages_to_compact,
-                _,
-                is_valid,
-            ) = await self.memory_manager.check_context(
+            await self._compact_tool_results_if_enabled(
                 messages=messages,
-                memory_compact_threshold=left_compact_threshold,
-                memory_compact_reserve=running_config.memory_compact_reserve,
-                as_token_counter=token_counter,
+                running_config=running_config,
             )
-
-            if not messages_to_compact:
-                return None
-
-            if not is_valid:
-                logger.warning(
-                    "Please include the output of the /history command when "
-                    "reporting the bug to the community. Invalid "
-                    "messages=%s",
-                    messages,
-                )
-                keep_length: int = MEMORY_COMPACT_KEEP_RECENT
-                messages_length = len(messages)
-                while keep_length > 0 and not check_valid_messages(
-                    messages[max(messages_length - keep_length, 0) :],
-                ):
-                    keep_length -= 1
-
-                if keep_length > 0:
-                    messages_to_compact = messages[
-                        : max(messages_length - keep_length, 0)
-                    ]
-                else:
-                    messages_to_compact = messages
-
+            # pylint: disable=no-member
+            messages_to_compact = await self._get_messages_to_compact(
+                messages=messages,
+                left_compact_threshold=left_compact_threshold,
+                memory_compact_reserve=running_config.memory_compact_reserve,
+                token_counter=token_counter,
+            )
             if not messages_to_compact:
                 return None
 
@@ -184,75 +326,32 @@ class MemoryCompactionHook:
                 self.memory_manager.add_async_summary_task(
                     messages=messages_to_compact,
                 )
+            # pylint: enable=no-member
 
-            await self._print_status_message(
-                agent,
-                "🔄 Context compaction started...",
+            compact_content = await self._run_context_compaction(
+                agent=agent,
+                running_config=running_config,
+                memory=memory,
+                messages_to_compact=messages_to_compact,
             )
-
-            if running_config.context_compact.context_compact_enabled:
-                compact_content = ""
-                last_error = ""
-                for attempt in range(1, self.MAX_RETRIES + 1):
-                    try:
-                        prev_summary = memory.get_compressed_summary()
-                        compact_content = (
-                            await self.memory_manager.compact_memory(
-                                messages=messages_to_compact,
-                                previous_summary=prev_summary,
-                            )
-                        )
-                        break
-                    except Exception as e:
-                        last_error = str(e)
-                        if attempt < self.MAX_RETRIES:
-                            backoff = self._compute_retry_backoff(attempt)
-                            logger.warning(
-                                "compact_memory attempt %d/%d failed: %s, "
-                                "retrying in %.1fs...",
-                                attempt,
-                                self.MAX_RETRIES,
-                                e,
-                                backoff,
-                            )
-                            await asyncio.sleep(backoff)
-                        else:
-                            logger.error(
-                                "compact_memory failed after %d attempts: %s",
-                                self.MAX_RETRIES,
-                                e,
-                            )
-
-                if not self._is_valid_compact_content(compact_content):
-                    error_msg = last_error or "empty result"
-                    await self._print_status_message(
-                        agent,
-                        f"⚠️ Context compaction failed: {error_msg}",
-                    )
-                else:
-                    await self._print_status_message(
-                        agent,
-                        "✅ Context compaction completed",
-                    )
-            else:
-                compact_content = ""
-                await self._print_status_message(
-                    agent,
-                    "✅ Context compaction skipped",
-                )
-
             if compact_content:
-                updated_count = await memory.mark_messages_compressed(
-                    messages_to_compact,
+                await self._persist_compacted_summary(
+                    memory=memory,
+                    messages_to_compact=messages_to_compact,
+                    compact_content=compact_content,
                 )
-                logger.info(f"Marked {updated_count} messages as compacted")
 
-                await memory.update_compressed_summary(compact_content)
-
-        except Exception as e:
+        except (
+            asyncio.TimeoutError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            ValidationError,
+        ) as exc:
             logger.exception(
                 "Failed to compact memory in pre_reasoning hook: %s",
-                e,
+                exc,
                 exc_info=True,
             )
 
