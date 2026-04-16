@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button, Modal } from "@agentscope-ai/design";
+import { Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import {
-  isSupportedSkillUrl,
-  SUPPORTED_SKILL_URL_PREFIXES,
-} from "@/constants/skill";
-import styles from "../index.module.less";
+  ExportOutlined,
+  LinkOutlined,
+  CopyOutlined,
+  CloseOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  DownOutlined,
+  PaperClipOutlined,
+} from "@ant-design/icons";
+import { isSupportedSkillUrl, skillMarkets, type SkillMarket } from "./index";
+import styles from "./ImportHubModal.module.less";
 
 interface ImportHubModalProps {
   open: boolean;
@@ -14,6 +22,34 @@ interface ImportHubModalProps {
   onConfirm: (url: string, targetName?: string) => Promise<void>;
   cancelImport?: () => void;
   hint?: string;
+}
+
+function validateUrl(
+  url: string,
+): { ok: true; source: string } | { ok: false; message: string } {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return { ok: false, message: "" };
+  }
+
+  try {
+    new URL(trimmed);
+  } catch {
+    return { ok: false, message: "Invalid URL format" };
+  }
+
+  const source = skillMarkets.find((m) =>
+    trimmed.toLowerCase().startsWith(m.urlPrefix.toLowerCase()),
+  );
+  if (!source) {
+    return { ok: false, message: "Unsupported source" };
+  }
+
+  if (!isSupportedSkillUrl(trimmed)) {
+    return { ok: false, message: "URL format not supported" };
+  }
+
+  return { ok: true, source: source.name };
 }
 
 export function ImportHubModal({
@@ -26,35 +62,32 @@ export function ImportHubModal({
 }: ImportHubModalProps) {
   const { t } = useTranslation();
   const [importUrl, setImportUrl] = useState("");
-  const [importUrlError, setImportUrlError] = useState("");
+  const [activeMarket, setActiveMarket] = useState<string | null>(
+    skillMarkets[0]?.key || null,
+  );
+
+  const validation = useMemo(() => validateUrl(importUrl), [importUrl]);
+  const canImport = validation.ok && !importing;
 
   const handleClose = () => {
     if (importing) return;
     setImportUrl("");
-    setImportUrlError("");
+    setActiveMarket(skillMarkets[0]?.key || null);
     onCancel();
   };
 
-  const handleUrlChange = (value: string) => {
-    setImportUrl(value);
-    const trimmed = value.trim();
-    if (trimmed && !isSupportedSkillUrl(trimmed)) {
-      setImportUrlError(t("skills.invalidSkillUrlSource"));
-      return;
-    }
-    setImportUrlError("");
+  const handleConfirm = async () => {
+    if (importing || !validation.ok) return;
+    await onConfirm(importUrl.trim());
   };
 
-  const handleConfirm = async () => {
-    if (importing) return;
-    const trimmed = importUrl.trim();
-    if (!trimmed) return;
-    if (!isSupportedSkillUrl(trimmed)) {
-      setImportUrlError(t("skills.invalidSkillUrlSource"));
-      return;
-    }
-    await onConfirm(trimmed);
-  };
+  const inputStateClass = validation.ok
+    ? styles.valid
+    : validation.message
+    ? styles.invalid
+    : "";
+
+  const activeMarketData = skillMarkets.find((m) => m.key === activeMarket);
 
   return (
     <Modal
@@ -65,11 +98,12 @@ export function ImportHubModal({
       keyboard={!importing}
       closable={!importing}
       maskClosable={!importing}
+      width={680}
       footer={
-        <div style={{ textAlign: "right" }}>
+        <div className={styles.modalFooter}>
           <Button
+            className={styles.cancelButton}
             onClick={importing && cancelImport ? cancelImport : handleClose}
-            style={{ marginRight: 8 }}
           >
             {t(
               importing && cancelImport
@@ -78,54 +112,162 @@ export function ImportHubModal({
             )}
           </Button>
           <Button
+            className={styles.importButton}
             type="primary"
             onClick={handleConfirm}
             loading={importing}
-            disabled={importing || !importUrl.trim() || !!importUrlError}
+            disabled={!canImport}
           >
             {t("skills.importHub")}
           </Button>
         </div>
       }
-      width={760}
     >
-      <div className={styles.importHintBlock}>
-        {hint && <p className={styles.importHintTitle}>{hint}</p>}
-        <p className={styles.importHintTitle}>
-          {t("skills.supportedSkillUrlSources")}
+      {hint && (
+        <p style={{ margin: "0 0 12px", fontSize: 13, color: "#666" }}>
+          {hint}
         </p>
-        <ul className={styles.importHintList}>
-          {SUPPORTED_SKILL_URL_PREFIXES.map((url) => (
-            <li key={url}>{url}</li>
-          ))}
-        </ul>
-        <p className={styles.importHintTitle}>{t("skills.urlExamples")}</p>
-        <ul className={styles.importHintList}>
-          <li>https://skills.sh/vercel-labs/skills/find-skills</li>
-          <li>https://lobehub.com/zh/skills/openclaw-skills-cli-developer</li>
-          <li>
-            https://market.lobehub.com/api/v1/skills/openclaw-skills-cli-developer/download
-          </li>
-          <li>
-            https://github.com/anthropics/skills/tree/main/skills/skill-creator
-          </li>
-          <li>https://modelscope.cn/skills/@anthropics/skill-creator</li>
-        </ul>
+      )}
+
+      <div className={styles.urlInputSection}>
+        <div className={`${styles.inputWrapper} ${inputStateClass}`}>
+          <LinkOutlined className={styles.urlInputIcon} />
+          <input
+            className={styles.urlInput}
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            placeholder={t("skills.enterSkillUrl")}
+            disabled={importing}
+            aria-label={t("skills.enterSkillUrl")}
+            type="text"
+          />
+          {importUrl && (
+            <button
+              className={styles.iconButton}
+              onClick={() => setImportUrl("")}
+              title={t("common.clear")}
+              type="button"
+              aria-label={t("common.clear")}
+            >
+              <CloseOutlined />
+            </button>
+          )}
+          <button
+            className={styles.iconButton}
+            onClick={async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                setImportUrl(text);
+              } catch {}
+            }}
+            title={t("common.paste")}
+            type="button"
+            aria-label={t("common.paste")}
+          >
+            <CopyOutlined />
+          </button>
+        </div>
+
+        <div className={styles.validationStatus}>
+          {validation.ok ? (
+            <span className={styles.valid}>
+              <CheckCircleOutlined />
+              {t("skills.urlValid", { source: validation.source })}
+            </span>
+          ) : validation.message ? (
+            <span className={styles.invalid}>
+              <CloseCircleOutlined />
+              {validation.message}
+            </span>
+          ) : importing ? (
+            <span className={styles.validating}>
+              <Spin size="small" />
+              {t("common.loading")}
+            </span>
+          ) : null}
+        </div>
       </div>
 
-      <input
-        className={styles.importUrlInput}
-        value={importUrl}
-        onChange={(e) => handleUrlChange(e.target.value)}
-        placeholder={t("skills.enterSkillUrl")}
-        disabled={importing}
-      />
-      {importUrlError ? (
-        <div className={styles.importUrlError}>{importUrlError}</div>
-      ) : null}
-      {importing ? (
-        <div className={styles.importLoadingText}>{t("common.loading")}</div>
-      ) : null}
+      <div className={styles.divider}>{t("skills.orChooseFromSources")}</div>
+
+      <div className={styles.sourcesGrid}>
+        {skillMarkets.map((market: SkillMarket) => (
+          <div
+            key={market.key}
+            className={`${styles.sourceCard} ${
+              activeMarket === market.key ? styles.active : ""
+            } ${importing ? styles.disabled : ""}`}
+            onClick={
+              importing
+                ? undefined
+                : () =>
+                    setActiveMarket((prev) =>
+                      prev === market.key ? null : market.key,
+                    )
+            }
+            role="button"
+            tabIndex={importing ? -1 : 0}
+            onKeyDown={(e) => {
+              if (!importing && e.key === "Enter") {
+                setActiveMarket((prev) =>
+                  prev === market.key ? null : market.key,
+                );
+              }
+            }}
+            aria-expanded={activeMarket === market.key}
+            aria-label={market.name}
+          >
+            <a
+              href={market.homepage}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.externalLink}
+              onClick={(e) => e.stopPropagation()}
+              title={market.homepage}
+              aria-label={`${market.name} homepage`}
+            >
+              <ExportOutlined />
+            </a>
+            <div className={styles.sourceCardName}>{market.name}</div>
+            <div className={styles.sourceCardMeta}>
+              {market.examples.length > 0 && (
+                <>
+                  {market.examples.length} examples
+                  <DownOutlined
+                    className={`${styles.sourceCardArrow} ${
+                      activeMarket === market.key ? styles.active : ""
+                    }`}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {activeMarketData && activeMarketData.examples.length > 0 && (
+        <div className={styles.examplesPanel}>
+          <div className={styles.examplesHeader}>
+            <PaperClipOutlined />
+            {t("skills.examplesFrom", { source: activeMarketData.name })}
+          </div>
+          <div className={styles.examplesList}>
+            {activeMarketData.examples.map((example, idx) => (
+              <button
+                key={idx}
+                className={styles.exampleItem}
+                onClick={() => setImportUrl(example.url)}
+                title={t("skills.clickToFill")}
+                type="button"
+              >
+                <LinkOutlined className={styles.exampleItemIcon} />
+                <span className={styles.exampleUrl}>{example.url}</span>
+                <span className={styles.exampleItemLabel}>{example.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
