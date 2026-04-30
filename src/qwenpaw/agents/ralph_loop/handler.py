@@ -48,6 +48,10 @@ def parse_ralph_command(query: str) -> dict | None:
     if not remainder:
         return None
 
+    # Validate the task content (length, meta-questions).
+    if validate_ralph_task(remainder) is not None:
+        return None
+
     return {
         "task": remainder,
         "max_iterations": max_iter,

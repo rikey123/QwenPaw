@@ -506,10 +506,60 @@ class AgentRunner(Runner):
                 ralph_agent.set_console_output_enabled(enabled=False)
 
                 try:
-                    result = await run_loop(
-                        agent=ralph_agent,
-                        state=loop_state,
-                    )
+                    # Use a queue + background task to yield real-time
+                    # progress messages while the loop runs.
+                    progress_queue: asyncio.Queue = asyncio.Queue()
+
+                    def _on_progress(iteration: int, max_iter: int) -> None:
+                        progress_queue.put_nowait(
+                            ("progress", iteration, max_iter)
+                        )
+
+                    async def _run_loop_wrapper() -> None:
+                        try:
+                            result = await run_loop(
+                                agent=ralph_agent,
+                                state=loop_state,
+                                progress_callback=_on_progress,
+                            )
+                            progress_queue.put_nowait(("done", result))
+                        except Exception as exc:
+                            progress_queue.put_nowait(("error", exc))
+
+                    loop_task = asyncio.create_task(_run_loop_wrapper())
+
+                    try:
+                        while True:
+                            event = await progress_queue.get()
+                            event_type = event[0]
+
+                            if event_type == "progress":
+                                _iter, _max = event[1], event[2]
+                                msg_text = (
+                                    f"Ralph loop: iteration {_iter}/{_max}"
+                                )
+                                yield Msg(
+                                    name="assistant", content=msg_text
+                                ), False
+
+                            elif event_type == "done":
+                                result = event[1]
+                                break
+
+                            elif event_type == "error":
+                                raise event[1]
+                    finally:
+                        # Always await the background task to surface
+                        # any unhandled exceptions.
+                        if not loop_task.done():
+                            loop_task.cancel()
+                            try:
+                                await loop_task
+                            except asyncio.CancelledError:
+                                pass
+                        else:
+                            await loop_task
+
                     summary = (
                         f"Ralph loop completed after "
                         f"{result.iterations} iteration(s)."
