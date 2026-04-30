@@ -266,6 +266,7 @@
     "context": "Context",
     "commands": "Magic commands",
     "plan": "Plan mode",
+    "ralphLoop": "Ralph Loop",
     "heartbeat": "Heartbeat",
     "config": "Config & working dir",
     "security": "Security",
