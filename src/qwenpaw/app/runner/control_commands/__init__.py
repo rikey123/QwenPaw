@@ -25,6 +25,7 @@ from .approval_handler import (
     ApproveCommandHandler,
     DenyCommandHandler,
 )
+from .cancel_loop import CancelLoopHandler
 from .model_handler import ModelCommandHandler
 from .skills_handler import SkillsCommandHandler
 from .stop_handler import StopCommandHandler
@@ -40,6 +41,7 @@ def _register_defaults() -> None:
     register_command(ApprovalCommandHandler())
     register_command(ApproveCommandHandler())
     register_command(DenyCommandHandler())
+    register_command(CancelLoopHandler())
     register_command(StopCommandHandler())
     register_command(ModelCommandHandler())
     register_command(SkillsCommandHandler())
@@ -220,6 +222,7 @@ __all__ = [
     "ApprovalCommandHandler",
     "ApproveCommandHandler",
     "BaseControlCommandHandler",
+    "CancelLoopHandler",
     "ControlContext",
     "DenyCommandHandler",
     "ModelCommandHandler",
