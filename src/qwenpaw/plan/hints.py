@@ -72,6 +72,7 @@ def check_plan_tool_gate(  # pylint: disable=protected-access
 
 def should_skip_auto_continue(  # pylint: disable=protected-access
     plan_notebook,
+    agent=None,
 ) -> bool:
     """True when auto-continue must be suppressed for the current turn.
 
@@ -79,6 +80,10 @@ def should_skip_auto_continue(  # pylint: disable=protected-access
     ``_plan_just_mutated`` so the agent can present the plan and wait for
     confirmation without auto-continue injecting an extra reasoning pass.
     """
+    # Skip auto-continue during ralph-loop execution
+    if agent is not None and getattr(agent, "_ralph_loop_active", False):
+        return True
+
     if plan_notebook is None:
         return False
 

@@ -138,6 +138,7 @@ class QwenPawAgent(ToolGuardMixin, ReActAgent):
         self._namesake_strategy = namesake_strategy
         self._workspace_dir = workspace_dir
         self._task_tracker = task_tracker
+        self._ralph_loop_active = False
 
         # Extract configuration from agent_config
         running_config = agent_config.running
@@ -799,7 +800,7 @@ class QwenPawAgent(ToolGuardMixin, ReActAgent):
         from ..plan.hints import should_skip_auto_continue
 
         nb = getattr(self, "plan_notebook", None)
-        if should_skip_auto_continue(nb):
+        if should_skip_auto_continue(nb, agent=self):
             return msg
 
         running = self._agent_config.running
