@@ -28,10 +28,15 @@ from .mission_dispatch import (
     maybe_handle_mission_command,
     detect_active_mission_phase,
 )
+from .ralph_dispatch import (
+    maybe_handle_ralph_command,
+    detect_active_ralph_phase,
+)
 from .session import SafeJSONSession
 from .utils import build_env_context
 from ..channels.schema import DEFAULT_CHANNEL
 from ...agents.react_agent import QwenPawAgent
+from ...agents.ralph_loop import _active_loop_states
 from ...exceptions import convert_model_exception
 from ...agents.utils.file_handling import (
     read_text_file_with_encoding_fallback,
@@ -460,6 +465,66 @@ class AgentRunner(Runner):
                     msgs,
                     refresher + original,
                 )
+
+            # --- Ralph Loop: /ralph-loop ---------------------------
+            ralph_info: dict | None = None
+
+            ralph_result = maybe_handle_ralph_command(
+                query=query,
+                multi_agent_manager=self._multi_agent_manager,
+            )
+            if isinstance(ralph_result, dict):
+                ralph_info = ralph_result
+
+            # Ralph Loop mode: execute loop
+            if ralph_info is not None:
+                from ...agents.ralph_loop.state import LoopState
+                from ...agents.ralph_loop.ralph_runner import run_loop
+
+                task = ralph_info["task"]
+                max_iterations = ralph_info["max_iterations"]
+
+                loop_state = LoopState(
+                    task=task,
+                    max_iterations=max_iterations,
+                )
+                _active_loop_states[session_id] = loop_state
+
+                # Create a fresh agent for the loop (same pattern as plan mode
+                # but without plan_notebook)
+                ralph_agent = QwenPawAgent(
+                    agent_config=agent_config,
+                    env_context=env_context,
+                    mcp_clients=mcp_clients,
+                    memory_manager=self.memory_manager,
+                    context_manager=self.context_manager,
+                    request_context=base_request_context,
+                    workspace_dir=self.workspace_dir,
+                    task_tracker=self._task_tracker,
+                )
+                await ralph_agent.register_mcp_clients()
+                ralph_agent.set_console_output_enabled(enabled=False)
+
+                try:
+                    result = await run_loop(
+                        agent=ralph_agent,
+                        state=loop_state,
+                    )
+                    summary = (
+                        f"Ralph loop completed after "
+                        f"{result.iterations} iteration(s)."
+                    )
+                    yield Msg(name="assistant", content=summary), True
+                finally:
+                    # Clean up registry
+                    _active_loop_states.pop(session_id, None)
+                    if ralph_agent is not None:
+                        await self.session.save_session_state(
+                            session_id=session_id,
+                            user_id=user_id,
+                            agent=ralph_agent,
+                        )
+                return
 
             # --- Plan Mode ------------------------------------------
             plan_notebook = None
